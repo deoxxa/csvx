@@ -1,16 +1,20 @@
 package csvx
 
 import (
-	"encoding"
+	"compress/gzip"
 	"encoding/csv"
 	"io"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mitchellh/ioprogress"
 	"github.com/pkg/errors"
+
+	"fknsrs.biz/p/civil"
+	"fknsrs.biz/p/timex"
 )
 
 type Scanner interface {
@@ -24,6 +28,7 @@ type Reader struct {
 	row []string
 	err error
 	cl  func() error
+	tz  *time.Location
 }
 
 type Option func(rd *Reader) error
@@ -37,6 +42,15 @@ func FromFile(filename string) Option {
 
 		rd.fd = fd
 		rd.cl = fd.Close
+
+		if strings.HasSuffix(filename, ".gz") {
+			gz, err := gzip.NewReader(rd.fd)
+			if err != nil {
+				return errors.Wrap(err, "csvx.FromPath")
+			}
+
+			rd.fd = gz
+		}
 
 		return nil
 	}
@@ -54,11 +68,23 @@ func FromReader(fd io.Reader) Option {
 	}
 }
 
+func WithTZ(tz *time.Location) Option {
+	return func(rd *Reader) error {
+		rd.tz = tz
+
+		return nil
+	}
+}
+
 type canStat interface {
 	Stat() (os.FileInfo, error)
 }
 
 func WithProgress() Option {
+	return WithProgressWindow(30)
+}
+
+func WithProgressWindow(window int) Option {
 	return func(rd *Reader) error {
 		fd, ok := rd.fd.(canStat)
 		if !ok {
@@ -67,13 +93,13 @@ func WithProgress() Option {
 
 		st, err := fd.Stat()
 		if err != nil {
-			return errors.Wrap(err, "csvx.WithProgress")
+			return errors.Wrap(err, "csvx.WithProgressWindow")
 		}
 
 		rd.fd = &ioprogress.Reader{
 			Reader:   rd.fd,
 			Size:     st.Size(),
-			DrawFunc: ioprogress.DrawTerminalf(os.Stderr, ioprogress.DrawTextFormatBar(50)),
+			DrawFunc: ioprogress.DrawTerminalf(os.Stderr, timeRemainingFormatter(window)),
 		}
 
 		return nil
@@ -165,6 +191,38 @@ func (r *Reader) Scan(out ...interface{}) error {
 				}
 				*e = &n
 			}
+		case *time.Time:
+			t, err := timex.ParseDefaultsInLocation(c, r.tz)
+			if err != nil {
+				return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
+			}
+			*e = t
+		case **time.Time:
+			if c == "" {
+				*e = nil
+			} else {
+				t, err := timex.ParseDefaultsInLocation(c, r.tz)
+				if err != nil {
+					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
+				}
+				*e = &t
+			}
+		case *civil.Date:
+			t, err := civil.ParseDate(c)
+			if err != nil {
+				return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
+			}
+			*e = t
+		case **civil.Date:
+			if c == "" {
+				*e = nil
+			} else {
+				t, err := civil.ParseDate(c)
+				if err != nil {
+					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
+				}
+				*e = &t
+			}
 		case *bool:
 			if c == "1" || c == "yes" || c == "true" || c == "t" {
 				*e = true
@@ -194,14 +252,6 @@ func (r *Reader) Scan(out ...interface{}) error {
 
 			if s, ok := v.(Scanner); ok {
 				if err := s.ScanString(c); err != nil {
-					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
-				}
-
-				continue
-			}
-
-			if m, ok := v.(encoding.TextUnmarshaler); ok {
-				if err := m.UnmarshalText([]byte(c)); err != nil {
 					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
 				}
 
@@ -294,6 +344,8 @@ func FindColumns(row []string, names ...string) (map[string]int, error) {
 outer:
 	for _, n := range names {
 		for i, e := range row {
+			e = strings.TrimSpace(e)
+
 			if strings.Replace(strings.ToLower(e), " ", "_", -1) == strings.Replace(strings.ToLower(n), " ", "_", -1) {
 				m[n] = i
 				continue outer
