@@ -2,6 +2,7 @@ package csvx
 
 import (
 	"compress/gzip"
+	"encoding"
 	"encoding/csv"
 	"io"
 	"os"
@@ -252,6 +253,14 @@ func (r *Reader) Scan(out ...interface{}) error {
 
 			if s, ok := v.(Scanner); ok {
 				if err := s.ScanString(c); err != nil {
+					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
+				}
+
+				continue
+			}
+
+			if s, ok := v.(encoding.TextUnmarshaler); ok {
+				if err := s.UnmarshalText([]byte(c)); err != nil {
 					return errors.Wrapf(err, "csvx.Reader.Scan(%T) (index %d)", e, i)
 				}
 
