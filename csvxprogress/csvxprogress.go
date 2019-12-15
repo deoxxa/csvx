@@ -2,10 +2,44 @@ package csvx
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/mitchellh/ioprogress"
+	"github.com/pkg/errors"
+
+	"fknsrs.biz/p/csvx"
 )
+
+type canStat interface {
+	Stat() (os.FileInfo, error)
+}
+
+func WithProgress() csvx.Option {
+	return WithProgressWindow(30)
+}
+
+func WithProgressWindow(window int) csvx.Option {
+	return func(rd *csvx.Reader) error {
+		fd, ok := rd.FD.(canStat)
+		if !ok {
+			return nil
+		}
+
+		st, err := fd.Stat()
+		if err != nil {
+			return errors.Wrap(err, "csvxprogress.WithProgressWindow")
+		}
+
+		rd.FD = &ioprogress.Reader{
+			Reader:   rd.FD,
+			Size:     st.Size(),
+			DrawFunc: ioprogress.DrawTerminalf(os.Stderr, timeRemainingFormatter(window)),
+		}
+
+		return nil
+	}
+}
 
 var byteUnits = []string{"B", "KB", "MB", "GB", "TB", "PB"}
 

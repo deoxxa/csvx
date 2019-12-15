@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mitchellh/ioprogress"
 	"github.com/pkg/errors"
 
 	"fknsrs.biz/p/civil"
@@ -23,7 +22,7 @@ type Scanner interface {
 }
 
 type Reader struct {
-	fd  io.Reader
+	FD  io.Reader
 	rd  *csv.Reader
 	hdr []string
 	row []string
@@ -41,16 +40,16 @@ func FromFile(filename string) Option {
 			return errors.Wrap(err, "csvx.FromPath")
 		}
 
-		rd.fd = fd
+		rd.FD = fd
 		rd.cl = fd.Close
 
 		if strings.HasSuffix(filename, ".gz") {
-			gz, err := gzip.NewReader(rd.fd)
+			gz, err := gzip.NewReader(rd.FD)
 			if err != nil {
 				return errors.Wrap(err, "csvx.FromPath")
 			}
 
-			rd.fd = gz
+			rd.FD = gz
 		}
 
 		return nil
@@ -59,7 +58,7 @@ func FromFile(filename string) Option {
 
 func FromReader(fd io.Reader) Option {
 	return func(rd *Reader) error {
-		rd.fd = fd
+		rd.FD = fd
 
 		if cl, ok := fd.(io.Closer); ok {
 			rd.cl = cl.Close
@@ -77,36 +76,6 @@ func WithTZ(tz *time.Location) Option {
 	}
 }
 
-type canStat interface {
-	Stat() (os.FileInfo, error)
-}
-
-func WithProgress() Option {
-	return WithProgressWindow(30)
-}
-
-func WithProgressWindow(window int) Option {
-	return func(rd *Reader) error {
-		fd, ok := rd.fd.(canStat)
-		if !ok {
-			return nil
-		}
-
-		st, err := fd.Stat()
-		if err != nil {
-			return errors.Wrap(err, "csvx.WithProgressWindow")
-		}
-
-		rd.fd = &ioprogress.Reader{
-			Reader:   rd.fd,
-			Size:     st.Size(),
-			DrawFunc: ioprogress.DrawTerminalf(os.Stderr, timeRemainingFormatter(window)),
-		}
-
-		return nil
-	}
-}
-
 func NewReader(opts ...Option) (*Reader, error) {
 	r := &Reader{}
 
@@ -116,11 +85,11 @@ func NewReader(opts ...Option) (*Reader, error) {
 		}
 	}
 
-	if r.fd == nil {
+	if r.FD == nil {
 		return nil, errors.Errorf("csvx.NewReader: fd is nil after option processing")
 	}
 
-	r.rd = csv.NewReader(r.fd)
+	r.rd = csv.NewReader(r.FD)
 
 	hdr, err := r.rd.Read()
 	if err != nil {
