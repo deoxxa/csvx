@@ -1,4 +1,4 @@
-package csvx
+package csvxprogress
 
 import (
 	"fmt"
