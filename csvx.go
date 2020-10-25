@@ -346,7 +346,7 @@ outer:
 	}
 
 	if len(missing) > 0 {
-		return nil, errors.Errorf("findColumns: couldn't find columns %s", strings.Join(missing, ", "))
+		return nil, errors.Errorf("FindColumns: couldn't find columns %s", strings.Join(missing, ", "))
 	}
 
 	return m, nil
