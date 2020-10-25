@@ -29,6 +29,7 @@ type Reader struct {
 	err error
 	cl  func() error
 	tz  *time.Location
+	gz  bool
 }
 
 type Option func(rd *Reader) error
@@ -44,12 +45,7 @@ func FromFile(filename string) Option {
 		rd.cl = fd.Close
 
 		if strings.HasSuffix(filename, ".gz") {
-			gz, err := gzip.NewReader(rd.FD)
-			if err != nil {
-				return errors.Wrap(err, "csvx.FromPath")
-			}
-
-			rd.FD = gz
+			rd.gz = true
 		}
 
 		return nil
@@ -64,6 +60,13 @@ func FromReader(fd io.Reader) Option {
 			rd.cl = cl.Close
 		}
 
+		return nil
+	}
+}
+
+func Compressed() Option {
+	return func(rd *Reader) error {
+		rd.gz = true
 		return nil
 	}
 }
@@ -87,6 +90,15 @@ func NewReader(opts ...Option) (*Reader, error) {
 
 	if r.FD == nil {
 		return nil, errors.Errorf("csvx.NewReader: fd is nil after option processing")
+	}
+
+	if r.gz {
+		gz, err := gzip.NewReader(r.FD)
+		if err != nil {
+			return nil, errors.Wrap(err, "csvx.NewReader")
+		}
+
+		r.FD = gz
 	}
 
 	r.rd = csv.NewReader(r.FD)
